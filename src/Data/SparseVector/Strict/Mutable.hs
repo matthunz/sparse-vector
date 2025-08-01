@@ -1,4 +1,5 @@
 {-# LANGUAGE BangPatterns #-}
+
 -- |
 -- Module      : Data.SparseVector.Strict.Mutable
 -- Copyright   : (c) Matt Hunzinger, 2025
@@ -26,7 +27,7 @@ import Data.Vector.Strict.Mutable (MVector, PrimMonad (..))
 import qualified Data.Vector.Strict.Mutable as MV
 import Prelude hiding (read)
 
-newtype MSparseVector s a = MSparseVector {unMSparseVector :: MVector s (Maybe a)}
+newtype MSparseVector s a = MSparseVector {unMSparseVector :: MVector s (Bool, a)}
 
 empty :: (PrimMonad m) => m (MSparseVector (PrimState m) a)
 empty = do
@@ -38,46 +39,57 @@ insert ::
   Int ->
   a ->
   MSparseVector (PrimState m) a ->
-  m (MSparseVector (PrimState m) a)
+  m ()
 insert index a (MSparseVector vec) = do
   let len = MV.length vec
   if len >= index + 1
-    then MV.write vec index (Just a) >> return (MSparseVector vec)
+    then MV.write vec index (True, a)
     else do
-      newVec <- MV.replicate (index + 1) Nothing
-      MV.write newVec index (Just a)
-      return $ MSparseVector newVec
+      newVec <- MV.replicate (index + 1) (False, undefined)
+      MV.write newVec index (True, a)
 
 read :: (PrimMonad m) => MSparseVector (PrimState m) a -> Int -> m (Maybe a)
-read (MSparseVector vec) = MV.read vec
+read (MSparseVector vec) index = do
+  (present, val) <- MV.read vec index
+  return $ if present then Just val else Nothing
 {-# INLINE read #-}
 
-unsafeRead :: (PrimMonad m) => MSparseVector (PrimState m) a -> Int -> m (Maybe a)
-unsafeRead (MSparseVector vec) = MV.unsafeRead vec
+unsafeRead :: (PrimMonad m) => MSparseVector (PrimState m) a -> Int -> m a
+unsafeRead (MSparseVector vec) index = do
+  (_, val) <- MV.unsafeRead vec index
+  return val
 {-# INLINE unsafeRead #-}
 
-write :: (PrimMonad m) => MSparseVector (PrimState m) a -> Int -> Maybe a -> m ()
-write (MSparseVector vec) = MV.write vec
+write :: (PrimMonad m) => MSparseVector (PrimState m) a -> Int -> Maybe a -> a -> m ()
+write (MSparseVector vec) index maybeVal defaultVal =
+  case maybeVal of
+    Nothing -> MV.write vec index (False, defaultVal)
+    Just val -> MV.write vec index (True, val)
 {-# INLINE write #-}
 
-unsafeWrite :: (PrimMonad m) => MSparseVector (PrimState m) a -> Int -> Maybe a -> m ()
-unsafeWrite (MSparseVector vec) = MV.unsafeWrite vec
+unsafeWrite :: (PrimMonad m) => MSparseVector (PrimState m) a -> Int -> a -> m ()
+unsafeWrite (MSparseVector vec) index v = MV.unsafeWrite vec index (True, v)
 {-# INLINE unsafeWrite #-}
 
-modify :: (PrimMonad m) => MSparseVector (PrimState m) a -> Int -> (Maybe a -> Maybe a) -> m ()
-modify (MSparseVector vec) index f = do
-  !val <- MV.read vec index
-  MV.write vec index (f val)
+modify :: (PrimMonad m) => MSparseVector (PrimState m) a -> Int -> (Maybe a -> Maybe a) -> a -> m ()
+modify (MSparseVector vec) index f defaultVal = do
+  !(present, val) <- MV.read vec index
+  let currentVal = if present then Just val else Nothing
+  case f currentVal of
+    Nothing -> MV.write vec index (False, defaultVal)
+    Just newVal -> MV.write vec index (True, newVal)
 {-# INLINE modify #-}
 
 unsafeModify :: (PrimMonad m) => MSparseVector (PrimState m) a -> Int -> (a -> a) -> m ()
 unsafeModify (MSparseVector vec) index f = do
-  !val <- MV.unsafeRead vec index
-  case val of
-    Nothing -> return ()
-    Just v -> MV.unsafeWrite vec index (Just (f v))
+  !(present, val) <- MV.unsafeRead vec index
+  if present
+    then MV.unsafeWrite vec index (True, f val)
+    else return ()
 {-# INLINE unsafeModify #-}
 
 toList :: (PrimMonad m) => MSparseVector (PrimState m) a -> m [Maybe a]
-toList (MSparseVector v) = V.toList <$> V.freeze v
+toList (MSparseVector v) = do
+  pairs <- V.toList <$> V.freeze v
+  return $ map (\(present, val) -> if present then Just val else Nothing) pairs
 {-# INLINE toList #-}
