@@ -16,6 +16,8 @@ library
         Data.SparseVector.Mutable
         Data.SparseVector.Strict
         Data.SparseVector.Strict.Mutable
+        Data.SparseVector.Unboxed
+        Data.SparseVector.Unboxed.Mutable
 
     hs-source-dirs:   src
     default-language: Haskell2010
