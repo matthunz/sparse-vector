@@ -58,13 +58,6 @@ import qualified Data.Vector.Strict as V
 import Prelude hiding (lookup)
 
 -- | Sparse n-dimensional vector.
---
--- A sparse vector is defined as a @Vector (Bool, a)@,
--- where @(Bool, a)@ is a cell for an element in the sparse vector.
--- The Bool indicates whether the cell contains a valid element.
---
--- Inserting elements at some dimension @n@ will grow the vector up to @n@,
--- using @(False, defaultVal)@ to create empty cells.
 newtype SparseVector a = SparseVector {unSparseVector :: Vector (Bool, a)}
   deriving (Show, Eq, NFData)
 
@@ -76,29 +69,17 @@ instance Foldable SparseVector where
   foldr f acc (SparseVector v) = V.foldr (\(present, val) acc' -> if present then f val acc' else acc') acc v
   {-# INLINE foldr #-}
 
--- Note: Semigroup requires a default value for combining vectors of different lengths
--- We'll need to modify the interface to support this properly
-
 -- | Empty sparse vector with a default value.
 emptyWith :: a -> SparseVector a
 emptyWith _ = SparseVector V.empty
 {-# INLINE emptyWith #-}
 
--- | Empty sparse vector (requires a default value for operations that need it).
+-- | Empty sparse vector.
 empty :: SparseVector a
 empty = SparseVector V.empty
 {-# INLINE empty #-}
 
 -- | Insert an element at a given index into a `SparseVector`.
---
--- Inserting elements at some dimension @n@ will grow the vector up to @n@,
--- using @(False, defaultVal)@ to create empty cells.
---
--- >>> insert 0 'a' 'x' empty
--- SparseVector {unSparseVector = [(True, 'a')]}
---
--- >>> insert 2 'b' 'x' empty
--- SparseVector {unSparseVector = [(False, 'x'), (False, 'x'), (True, 'b')]}
 insert :: Int -> a -> SparseVector a -> SparseVector a
 insert index a (SparseVector vec) =
   let len = V.length vec
@@ -116,7 +97,7 @@ lookup i (SparseVector v) =
     _ -> Nothing
 {-# INLINE lookup #-}
 
--- | Delete an index from a `SparseVector`, replacing its cell with @(False, defaultVal)@.
+-- | Delete an index from a `SparseVector`.
 delete :: Int -> SparseVector a -> SparseVector a
 delete index (SparseVector vec) =
   SparseVector $ V.unsafeUpd vec [(index, (False, undefined))]
@@ -138,9 +119,6 @@ mapAccum f a (SparseVector v) =
       f' (False, _) = return (False, undefined)
       (v', a') = runState (V.mapM f' v) a
    in (a', SparseVector v')
-
--- For intersection operations, we need to handle the case where vectors have different lengths
--- and we need default values for padding
 
 intersection :: SparseVector a -> SparseVector b -> SparseVector a
 intersection sv1 sv2 = intersectionWith const sv1 sv2

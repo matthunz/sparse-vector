@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TupleSections #-}
 
 -- |
 -- Module      : Data.SparseVector
@@ -57,92 +58,77 @@ import Data.Vector.Mutable (PrimMonad (..))
 import Prelude hiding (lookup)
 
 -- | Sparse n-dimensional vector.
---
--- A sparse vector is defined as a @Vector (Maybe a)@,
--- where @Maybe a@ is a cell for an element in the sparse vector.
---
--- Inserting elements at some dimension @n@ will grow the vector up to @n@,
--- using @Nothing@ to create empty cells.
-newtype SparseVector a = SparseVector {unSparseVector :: Vector (Maybe a)}
-  deriving (Show, Eq, Functor, Foldable, Traversable, NFData)
+newtype SparseVector a = SparseVector {unSparseVector :: Vector (Bool, a)}
+  deriving (Show, Eq, NFData)
 
-instance Semigroup (SparseVector a) where
-  SparseVector v1 <> SparseVector v2 =
-    let (lhs, rhs) = if V.length v1 > V.length v2 then (v1, v2) else (v2, v1)
-     in SparseVector $ V.update lhs (V.indexed rhs)
-  {-# INLINE (<>) #-}
+instance Functor SparseVector where
+  fmap f (SparseVector v) = SparseVector $ V.map (\(present, val) -> (present, f val)) v
+  {-# INLINE fmap #-}
 
-instance Monoid (SparseVector a) where
-  mempty = empty
-  {-# INLINE mempty #-}
+instance Foldable SparseVector where
+  foldr f acc (SparseVector v) = V.foldr (\(present, val) acc' -> if present then f val acc' else acc') acc v
+  {-# INLINE foldr #-}
 
--- | Empty sparse vector.
+-- | Empty sparse vector (requires a default value for operations that need it).
 empty :: SparseVector a
 empty = SparseVector V.empty
 {-# INLINE empty #-}
 
 -- | Insert an element at a given index into a `SparseVector`.
---
--- Inserting elements at some dimension @n@ will grow the vector up to @n@,
--- using @Nothing@ to create empty cells.
---
--- >>> insert 0 'a' empty
--- SparseVector {unSparseVector = [Just 'a']}
---
--- >>> insert 2 'b' empty
--- SparseVector {unSparseVector = [Nothing,Nothing,Just 'b']}
 insert :: Int -> a -> SparseVector a -> SparseVector a
 insert index a (SparseVector vec) =
   let len = V.length vec
    in SparseVector $
         if len >= index + 1
-          then V.unsafeUpd vec [(index, Just a)]
-          else V.snoc (vec V.++ V.replicate (index - len) Nothing) (Just a)
+          then V.unsafeUpd vec [(index, (True, a))]
+          else V.snoc (vec V.++ V.replicate (index - len) (False, undefined)) (True, a)
 {-# INLINE insert #-}
 
 -- | Lookup an element at a given index in a `SparseVector`.
 lookup :: Int -> SparseVector a -> Maybe a
-lookup i (SparseVector v) = join $ v V.!? i
+lookup i (SparseVector v) =
+  case v V.!? i of
+    Just (True, val) -> Just val
+    _ -> Nothing
 {-# INLINE lookup #-}
 
--- | Delete an index from a `SparseVector`, replacing its cell with @Nothing@.
+-- | Delete an index from a `SparseVector`, replacing its cell with @(False, defaultVal)@.
 delete :: Int -> SparseVector a -> SparseVector a
 delete index (SparseVector vec) =
-  SparseVector $ V.unsafeUpd vec [(index, Nothing)]
+  SparseVector $ V.unsafeUpd vec [(index, (False, undefined))]
 {-# INLINE delete #-}
 
 mapWithKey :: (Int -> a -> b) -> SparseVector a -> SparseVector b
 mapWithKey f (SparseVector v) =
-  let go (i, Just a) = Just $ f i a
-      go _ = Nothing
+  let go (i, (present, val)) = (present, if present then f i val else undefined)
    in SparseVector (go <$> V.indexed v)
 {-# INLINE mapWithKey #-}
 
 mapAccum :: (a -> b -> (a, c)) -> a -> SparseVector b -> (a, SparseVector c)
 mapAccum f a (SparseVector v) =
-  let f' (Just b) = do
+  let f' (True, b) = do
         acc <- get
         let (acc', c) = f acc b
         put acc'
-        return (Just c)
-      f' Nothing = return Nothing
+        return (True, c)
+      f' (False, _) = return (False, undefined)
       (v', a') = runState (V.mapM f' v) a
    in (a', SparseVector v')
 
 intersection :: SparseVector a -> SparseVector b -> SparseVector a
-intersection = intersectionWith const
+intersection sv1 sv2 = intersectionWith const sv1 sv2
 
 intersectionWith :: (a -> b -> c) -> SparseVector a -> SparseVector b -> SparseVector c
-intersectionWith = intersectionWithKey . const
+intersectionWith f = intersectionWithKey (const f)
 
 intersectionWithKey :: (Int -> a -> b -> c) -> SparseVector a -> SparseVector b -> SparseVector c
 intersectionWithKey f (SparseVector a) (SparseVector b) =
   let (as, bs) =
         if V.length a >= V.length b
-          then (a, b V.++ V.replicate (V.length a - V.length b) Nothing)
-          else (a V.++ V.replicate (V.length b - V.length a) Nothing, b)
-      go (i, (Just a', Just b')) = Just $ f i a' b'
-      go _ = Nothing
+          then (a, b V.++ V.replicate (V.length a - V.length b) (False, undefined))
+          else (a V.++ V.replicate (V.length b - V.length a) (False, undefined), b)
+      go (i, ((True, a'), (True, b'))) = (True, f i a' b')
+      go _ = (False, undefined)
    in SparseVector . fmap go . V.indexed $ V.zip as bs
 
 intersectionVec :: SparseVector a -> SparseVector b -> Vector a
@@ -156,22 +142,22 @@ intersectionVecWith = intersectionVecWithKey . const
 intersectionVecWithKey :: (Int -> a -> b -> c) -> SparseVector a -> SparseVector b -> Vector c
 intersectionVecWithKey f (SparseVector a) (SparseVector b) = V.imapMaybe go $ V.zip a b
   where
-    go i (Just a', Just b') = Just $ f i a' b'
+    go i ((True, a'), (True, b')) = Just $ f i a' b'
     go _ _ = Nothing
 {-# INLINE intersectionVecWithKey #-}
 
 fromList :: [(Int, a)] -> SparseVector a
-fromList = foldr (uncurry insert) empty
+fromList xs = foldr (\(i, a) -> insert i a) empty xs
 
 toList :: SparseVector a -> [Maybe a]
-toList (SparseVector v) = V.toList v
+toList (SparseVector v) = V.toList $ V.map (\(present, val) -> if present then Just val else Nothing) v
 {-# INLINE toList #-}
 
 fromVector :: Vector a -> SparseVector a
-fromVector = SparseVector . fmap Just
+fromVector v = SparseVector $ V.map (True,) v
 
 toVector :: SparseVector a -> Vector a
-toVector (SparseVector v) = V.catMaybes v
+toVector (SparseVector v) = V.mapMaybe (\(present, val) -> if present then Just val else Nothing) v
 
 -- | Freeze a `MSparseVector` into a `SparseVector`.
 freeze :: (PrimMonad m) => MSparseVector (PrimState m) a -> m (SparseVector a)
