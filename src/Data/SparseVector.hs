@@ -37,7 +37,7 @@ module Data.SparseVector
     fromList,
     toList,
     fromVector,
-    toVector,
+    toVec,
 
     -- ** Mutations
     freeze,
@@ -69,7 +69,7 @@ instance Foldable SparseVector where
   foldr f acc (SparseVector v) = V.foldr (\(present, val) acc' -> if present then f val acc' else acc') acc v
   {-# INLINE foldr #-}
 
--- | Empty sparse vector (requires a default value for operations that need it).
+-- | Empty sparse vector.
 empty :: SparseVector a
 empty = SparseVector V.empty
 {-# INLINE empty #-}
@@ -156,8 +156,8 @@ toList (SparseVector v) = V.toList $ V.map (\(present, val) -> if present then J
 fromVector :: Vector a -> SparseVector a
 fromVector v = SparseVector $ V.map (True,) v
 
-toVector :: SparseVector a -> Vector a
-toVector (SparseVector v) = V.mapMaybe (\(present, val) -> if present then Just val else Nothing) v
+toVec :: SparseVector a -> Vector a
+toVec (SparseVector v) = V.mapMaybe (\(present, val) -> if present then Just val else Nothing) v
 
 -- | Freeze a `MSparseVector` into a `SparseVector`.
 freeze :: (PrimMonad m) => MSparseVector (PrimState m) a -> m (SparseVector a)

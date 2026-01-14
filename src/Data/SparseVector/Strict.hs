@@ -17,7 +17,6 @@ module Data.SparseVector.Strict
 
     -- * Construction
     empty,
-    emptyWith,
 
     -- ** Operations
     insert,
@@ -39,7 +38,7 @@ module Data.SparseVector.Strict
     toList,
     toPairList,
     fromVector,
-    toVector,
+    toVec,
     freeze,
     unsafeFreeze,
     thaw,
@@ -68,11 +67,6 @@ instance Functor SparseVector where
 instance Foldable SparseVector where
   foldr f acc (SparseVector v) = V.foldr (\(present, val) acc' -> if present then f val acc' else acc') acc v
   {-# INLINE foldr #-}
-
--- | Empty sparse vector with a default value.
-emptyWith :: a -> SparseVector a
-emptyWith _ = SparseVector V.empty
-{-# INLINE emptyWith #-}
 
 -- | Empty sparse vector.
 empty :: SparseVector a
@@ -165,8 +159,8 @@ toPairList (SparseVector v) = V.toList v
 fromVector :: Vector a -> SparseVector a
 fromVector v = SparseVector $ V.map (True,) v
 
-toVector :: SparseVector a -> Vector a
-toVector (SparseVector v) = V.mapMaybe (\(present, val) -> if present then Just val else Nothing) v
+toVec :: SparseVector a -> Vector a
+toVec (SparseVector v) = V.mapMaybe (\(present, val) -> if present then Just val else Nothing) v
 
 -- | Freeze a `MSparseVector` into a `SparseVector`.
 freeze :: (PrimMonad m) => MSparseVector (PrimState m) a -> m (SparseVector a)

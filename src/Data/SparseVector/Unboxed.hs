@@ -51,7 +51,7 @@ module Data.SparseVector.Unboxed
     fromList,
     toList,
     fromVector,
-    toVector,
+    toVec,
 
     -- ** Mutations
     freeze,
@@ -213,8 +213,8 @@ toList (SparseVector v) = map (\(present, val) -> if present then Just val else 
 fromVector :: (Unbox a) => Vector a -> SparseVector a
 fromVector v = SparseVector $ V.map (\x -> (True, x)) v
 
-toVector :: (Unbox a) => SparseVector a -> Vector a
-toVector (SparseVector v) = V.fromList $ mapMaybe (\(present, val) -> if present then Just val else Nothing) $ V.toList v
+toVec :: (Unbox a) => SparseVector a -> Vector a
+toVec (SparseVector v) = V.fromList $ mapMaybe (\(present, val) -> if present then Just val else Nothing) $ V.toList v
 
 -- | Freeze a `MSparseVector` into a `SparseVector`.
 freeze :: (PrimMonad m, Unbox a) => MSparseVector (PrimState m) a -> m (SparseVector a)
