@@ -17,6 +17,7 @@ module Data.SparseVector
 
     -- * Construction
     empty,
+    withCapacity,
 
     -- ** Operations
     insert,
@@ -59,7 +60,15 @@ import Prelude hiding (lookup)
 
 -- | Sparse n-dimensional vector.
 newtype SparseVector a = SparseVector {unSparseVector :: Vector (Bool, a)}
-  deriving (Show, Eq, NFData)
+  deriving (Eq, NFData)
+
+instance (Show a) => Show (SparseVector a) where
+  showsPrec d sv =
+    showParen (d > 10) $
+      showString "fromList " . showsPrec (11 :: Int) (catMaybes $ zipWith go [0 :: Int ..] (toList sv))
+    where
+      go i (Just a) = Just (i, a)
+      go _ Nothing = Nothing
 
 instance Functor SparseVector where
   fmap f (SparseVector v) = SparseVector $ V.map (\(present, val) -> (present, f val)) v
@@ -73,6 +82,11 @@ instance Foldable SparseVector where
 empty :: SparseVector a
 empty = SparseVector V.empty
 {-# INLINE empty #-}
+
+-- | Empty sparse vector with a given capacity.
+withCapacity :: Int -> SparseVector a
+withCapacity n = SparseVector (V.replicate n (False, undefined))
+{-# INLINE withCapacity #-}
 
 -- | Insert an element at a given index into a `SparseVector`.
 insert :: Int -> a -> SparseVector a -> SparseVector a
