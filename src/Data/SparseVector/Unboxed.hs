@@ -72,14 +72,6 @@ import qualified Data.Vector.Unboxed as V
 import Prelude hiding (lookup)
 
 -- | Sparse n-dimensional vector using unboxed vectors.
---
--- A sparse vector is defined as a @Vector (Bool, a)@,
--- where @(Bool, a)@ is a cell for an element in the sparse vector.
--- The Bool indicates whether the cell contains a valid element.
--- The element type @a@ must have an @Unbox@ instance, and @(Bool, a)@ must also have an @Unbox@ instance.
---
--- Inserting elements at some dimension @n@ will grow the vector up to @n@,
--- using @(False, defaultVal)@ to create empty cells.
 newtype SparseVector a = SparseVector {unSparseVector :: Vector (Bool, a)}
 
 -- Standalone deriving instances
