@@ -1,12 +1,12 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveTraversable #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 -- |
 -- Module      : Data.SparseVector.Unboxed
@@ -66,9 +66,9 @@ import Control.Monad
 import Control.Monad.State.Strict
 import Data.Maybe
 import Data.SparseVector.Unboxed.Mutable (MSparseVector (..))
-import Data.Vector.Unboxed (Vector, Unbox)
-import qualified Data.Vector.Unboxed as V
 import Data.Vector.Mutable (PrimMonad (..))
+import Data.Vector.Unboxed (Unbox, Vector)
+import qualified Data.Vector.Unboxed as V
 import Prelude hiding (lookup)
 
 -- | Sparse n-dimensional vector using unboxed vectors.
@@ -82,9 +82,11 @@ import Prelude hiding (lookup)
 -- using @(False, defaultVal)@ to create empty cells.
 newtype SparseVector a = SparseVector {unSparseVector :: Vector (Bool, a)}
 
--- Standalone deriving instances  
+-- Standalone deriving instances
 deriving instance (Show a, Unbox a) => Show (SparseVector a)
+
 deriving instance (Eq a, Unbox a) => Eq (SparseVector a)
+
 deriving instance (Unbox a) => NFData (SparseVector a)
 
 -- | Map a function over a SparseVector (requires Unbox constraints)
@@ -92,7 +94,7 @@ svMap :: (Unbox a, Unbox b) => (a -> b) -> SparseVector a -> SparseVector b
 svMap f (SparseVector v) = SparseVector $ V.map (\(present, val) -> (present, f val)) v
 {-# INLINE svMap #-}
 
--- | Fold a SparseVector from the right (requires Unbox constraints)  
+-- | Fold a SparseVector from the right (requires Unbox constraints)
 svFoldr :: (Unbox a) => (a -> b -> b) -> b -> SparseVector a -> b
 svFoldr f acc (SparseVector v) = V.foldr (\(present, val) acc' -> if present then f val acc' else acc') acc v
 {-# INLINE svFoldr #-}
@@ -120,20 +122,20 @@ empty = SparseVector V.empty
 -- | Insert an element at a given index into a `SparseVector`.
 --
 -- Inserting elements at some dimension @n@ will grow the vector up to @n@,
--- using @(False, undefined)@ to create empty cells.
+-- using @(False, a)@ to create empty cells (where @a@ is the inserted value).
 --
 -- >>> insert 0 'a' empty
 -- SparseVector {unSparseVector = [(True, 'a')]}
 --
 -- >>> insert 2 'b' empty
--- SparseVector {unSparseVector = [(False, undefined),(False, undefined),(True, 'b')]}
+-- SparseVector {unSparseVector = [(False, 'b'),(False, 'b'),(True, 'b')]}
 insert :: (Unbox a) => Int -> a -> SparseVector a -> SparseVector a
 insert index a (SparseVector vec) =
   let len = V.length vec
    in SparseVector $
         if len >= index + 1
           then V.unsafeUpd vec [(index, (True, a))]
-          else V.snoc (vec V.++ V.replicate (index - len) (False, undefined)) (True, a)
+          else V.snoc (vec V.++ V.replicate (index - len) (False, a)) (True, a)
 {-# INLINE insert #-}
 
 -- | Lookup an element at a given index in a `SparseVector`.
@@ -144,16 +146,17 @@ lookup i (SparseVector v) =
     _ -> Nothing
 {-# INLINE lookup #-}
 
--- | Delete an index from a `SparseVector`, replacing its cell with @(False, undefined)@.
+-- | Delete an index from a `SparseVector`, marking its cell as not present.
 delete :: (Unbox a) => Int -> SparseVector a -> SparseVector a
 delete index (SparseVector vec) =
-  SparseVector $ V.unsafeUpd vec [(index, (False, undefined))]
+  let (_, existingVal) = vec V.! index
+   in SparseVector $ V.unsafeUpd vec [(index, (False, existingVal))]
 {-# INLINE delete #-}
 
 mapWithKey :: (Unbox a, Unbox b) => (Int -> a -> b) -> SparseVector a -> SparseVector b
 mapWithKey f (SparseVector v) =
-  let indexed = zip [0..] (V.toList v)
-      go (i, (present, val)) = (present, if present then f i val else undefined)
+  let indexed = zip [0 ..] (V.toList v)
+      go (i, (present, val)) = (present, f i val)
    in SparseVector $ V.fromList $ map go indexed
 {-# INLINE mapWithKey #-}
 
@@ -164,8 +167,10 @@ mapAccum f a (SparseVector v) =
         let (acc', c) = f acc b
         put acc'
         return (True, c)
-      f' (False, _) = return (False, undefined)
-      -- Convert to list, process, and convert back since storable vectors don't have mapM
+      f' (False, b) = do
+        acc <- get
+        let (_, c) = f acc b
+        return (False, c)
       vecList = V.toList v
       (resultList, a') = runState (mapM f' vecList) a
    in (a', SparseVector (V.fromList resultList))
@@ -178,13 +183,12 @@ intersectionWith f = intersectionWithKey (const f)
 
 intersectionWithKey :: (Unbox a, Unbox b, Unbox c) => (Int -> a -> b -> c) -> SparseVector a -> SparseVector b -> SparseVector c
 intersectionWithKey f (SparseVector a) (SparseVector b) =
-  let (as, bs) =
-        if V.length a >= V.length b
-          then (a, b V.++ V.replicate (V.length a - V.length b) (False, undefined))
-          else (a V.++ V.replicate (V.length b - V.length a) (False, undefined), b)
+  let minLen = min (V.length a) (V.length b)
+      as = V.take minLen a
+      bs = V.take minLen b
       go (i, ((True, a'), (True, b'))) = (True, f i a' b')
-      go _ = (False, undefined)
-      pairs = zip [0..] $ zip (V.toList as) (V.toList bs)
+      go (i, ((_, a'), (_, b'))) = (False, f i a' b') -- Use f to produce a valid c value
+      pairs = zip [0 ..] $ zip (V.toList as) (V.toList bs)
    in SparseVector $ V.fromList $ map go pairs
 
 intersectionVec :: (Unbox a, Unbox b) => SparseVector a -> SparseVector b -> Vector a
@@ -196,10 +200,10 @@ intersectionVecWith = intersectionVecWithKey . const
 {-# INLINE intersectionVecWith #-}
 
 intersectionVecWithKey :: (Unbox a, Unbox b, Unbox c) => (Int -> a -> b -> c) -> SparseVector a -> SparseVector b -> Vector c
-intersectionVecWithKey f (SparseVector a) (SparseVector b) = 
+intersectionVecWithKey f (SparseVector a) (SparseVector b) =
   let go i (True, a') (True, b') = Just $ f i a' b'
       go _ _ _ = Nothing
-      results = zipWith3 go [0..] (V.toList a) (V.toList b)
+      results = zipWith3 go [0 ..] (V.toList a) (V.toList b)
    in V.fromList $ catMaybes results
 {-# INLINE intersectionVecWithKey #-}
 
